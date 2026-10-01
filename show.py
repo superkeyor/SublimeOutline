@@ -75,7 +75,7 @@ def show(window, view_id=None, ignore_existing=False, single_pane=False, other_g
     prev_focus = None
     if other_group:
         prev_focus = window.active_view()
-        symlist = prev_focus.get_symbols()
+        symlist = get_symbols(prev_focus)
         file_path = prev_focus.file_name()
         # simulate 'toggle sidebar':
         if prev_focus and 'outline' in prev_focus.scope_name(0):
@@ -126,6 +126,42 @@ def show(window, view_id=None, ignore_existing=False, single_pane=False, other_g
     window.focus_view(prev_focus)
     
     refresh_sym_view(view, symlist, file_path)
+
+def get_symbols(view):
+    names = []
+    starts = view.find_all(r'^[ \t]*#[ \t]*region[ \t]+(\S.*?)[ \t]*$', 0, '$1', names)
+    if not starts:
+        return view.get_symbols()
+    ends = view.find_all(r'^[ \t]*#[ \t]*endregion\b')
+    start_lines = set(r.a for r in starts)
+    items = sorted(
+        [(r.a, 'start', r, name) for r, name in zip(starts, names)] +
+        [(r.a, 'end', r, None) for r in ends] +
+        [(r.a, 'symbol', r, s) for r, s in view.get_symbols() if view.line(r.a).a not in start_lines],
+        key=lambda item: item[0])
+
+    symlist = []
+    stack = []
+    headers = set()
+    has_child = set()
+    for pos, kind, region, text in items:
+        if kind == 'end':
+            if stack:
+                stack.pop()
+        elif kind == 'start':
+            if stack:
+                has_child.add(stack[-1])
+            headers.add(len(symlist))
+            symlist.append((region, text, len(stack)))
+            stack.append(len(symlist) - 1)
+        else:
+            symlist.append((region, text, len(stack)))
+
+    result = []
+    for i, (region, text, depth) in enumerate(symlist):
+        icon = u'📂 ' if i in headers and (depth == 0 or i in has_child) else ''
+        result.append((region, '    ' * depth + icon + text))
+    return result
 
 def refresh_sym_view(sym_view, symlist, path):
     l = [symbol for range, symbol in symlist]
